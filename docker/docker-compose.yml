@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  vault:
+    image: hashicorp/vault:latest
+    container_name: pondapiproxy-vault
+    ports:
+      - "8200:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: dev-only-token
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    networks:
+      - pond-network
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: pondapiproxy-api
+    ports:
+      - "8000:8000"
+    environment:
+      POND_API_BASE_URL: ${POND_API_BASE_URL:-https://api.pondmobile.com}
+      POND_API_TIMEOUT: 30
+      ALLOWED_TOKENS: ${ALLOWED_TOKENS:-dev-token-1,dev-token-2}
+      IP_WHITELIST_PATH: /app/config/whitelist.txt
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: dev-only-token
+      VAULT_KV_PATH: pondmobile
+      VAULT_TOKEN_FIELD: token
+      APP_VERSION: 1.0.0
+      LOG_LEVEL: info
+      HOST: 0.0.0.0
+      PORT: 8000
+    volumes:
+      - ../config:/app/config:ro
+    depends_on:
+      vault:
+        condition: service_healthy
+    networks:
+      - pond-network
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:latest
+    container_name: pondapiproxy-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+    networks:
+      - pond-network
+    restart: unless-stopped
+
+networks:
+  pond-network:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:
